@@ -11,12 +11,58 @@ from datetime import datetime, date, timezone, timedelta
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import os
 import requests as req
-from flask import Flask, jsonify, render_template_string
+from flask import Flask, jsonify, render_template_string, request, session, redirect, url_for
+from functools import wraps
 
 from auth import get_valid_token
 
 app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET", "tsc-dashboard-secret-2026")
+
+DASHBOARD_PASSWORD = os.environ.get("DASHBOARD_PASSWORD", "TSC@2026")
+
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get("logado"):
+            return redirect("/login")
+        return f(*args, **kwargs)
+    return decorated
+
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TSC Shop — Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+  .card { background: white; border-radius: 12px; padding: 40px; width: 320px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+  h1 { font-size: 22px; color: #1a1a2e; margin-bottom: 8px; }
+  p { font-size: 13px; color: #888; margin-bottom: 24px; }
+  input { width: 100%; padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; margin-bottom: 14px; }
+  button { width: 100%; padding: 11px; background: #e94560; color: white; border: none; border-radius: 6px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button:hover { background: #c73652; }
+  .erro { color: #e94560; font-size: 13px; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>TSC Shop</h1>
+  <p>Dashboard de Promoções</p>
+  {% if erro %}<div class="erro">Senha incorreta!</div>{% endif %}
+  <form method="POST">
+    <input type="password" name="senha" placeholder="Senha" autofocus>
+    <button type="submit">Entrar</button>
+  </form>
+</div>
+</body>
+</html>"""
 
 # Cache global
 _cache = {"dados": None, "status": "idle", "iniciado_em": None, "atualizado_em": None}
@@ -638,12 +684,31 @@ def _carregar_em_background():
         _cache["status"] = f"erro: {e}"
 
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    erro = False
+    if request.method == "POST":
+        if request.form.get("senha") == DASHBOARD_PASSWORD:
+            session["logado"] = True
+            return redirect("/")
+        erro = True
+    return render_template_string(LOGIN_HTML, erro=erro)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect("/login")
+
+
 @app.route("/")
+@login_required
 def index():
     return render_template_string(HTML)
 
 
 @app.route("/api/atualizar", methods=["POST"])
+@login_required
 def api_atualizar():
     if _cache["status"] == "loading":
         return jsonify({"status": "loading", "msg": "Ja carregando..."})
@@ -653,6 +718,7 @@ def api_atualizar():
 
 
 @app.route("/api/status")
+@login_required
 def api_status():
     return jsonify({
         "status": _cache["status"],
@@ -662,6 +728,7 @@ def api_status():
 
 
 @app.route("/api/dados")
+@login_required
 def api_dados():
     if _cache["dados"] is None:
         return jsonify({"erro": "Dados não carregados ainda. Clique em Atualizar."}), 202

@@ -69,7 +69,7 @@ _cache = {"dados": None, "status": "idle", "iniciado_em": None, "atualizado_em":
 
 BASE = "https://api.mercadolibre.com"
 USER_ID = 48980675
-MAX_WORKERS = 10
+MAX_WORKERS = 30
 
 _token_cache = None
 

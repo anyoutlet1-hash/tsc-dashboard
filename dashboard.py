@@ -255,6 +255,9 @@ def carregar_dados():
     ]
     sem_promo.sort(key=lambda x: x["titulo"])
 
+    # Catálogo de marcas
+    catalogo = carregar_catalogo()
+
     return {
         "atualizado_em": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
         "total_em_promo": len(rows_dedup),
@@ -263,6 +266,79 @@ def carregar_dados():
         "sem_promo_count": len(sem_promo),
         "promocoes": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows_dedup],
         "sem_promo": sem_promo[:50],
+        "catalogo": catalogo,
+    }
+
+
+MARCAS_CATALOGO = ["ziphome", "tsc", "ranchero"]
+
+
+def carregar_catalogo():
+    """Verifica buy box dos anúncios de catálogo das marcas monitoradas."""
+    offset = 0
+    all_ids = []
+    while True:
+        r = _get(f"/users/{USER_ID}/items/search", params={"catalog_listing": "true", "status": "active", "limit": 100, "offset": offset})
+        if not r:
+            break
+        ids = r.get("results", [])
+        all_ids.extend(ids)
+        if len(ids) < 100:
+            break
+        offset += 100
+
+    # Filtra por marca no título
+    marcados = []
+    for i in range(0, len(all_ids), 20):
+        batch = all_ids[i:i+20]
+        r2 = _get("/items", params={"ids": ",".join(batch), "attributes": "id,title,catalog_product_id,permalink,price"})
+        if r2:
+            for it in r2:
+                body = it.get("body", {})
+                title = body.get("title", "").lower()
+                if any(m in title for m in MARCAS_CATALOGO):
+                    marcados.append(body)
+
+    # Verifica buy box
+    ganhando, perdendo = [], []
+    for item in marcados:
+        prod_id = item.get("catalog_product_id")
+        if not prod_id:
+            continue
+        try:
+            sellers_data = _get(f"/products/{prod_id}/items", params={"limit": 5})
+            results = sellers_data.get("results", []) if sellers_data else []
+            if not results:
+                continue
+            winner = results[0]
+            winner_seller_id = winner.get("seller_id")
+            winner_item_id = winner.get("item_id")
+            winner_price = winner.get("price")
+
+            entry = {
+                "item_id": item["id"],
+                "titulo": item.get("title", ""),
+                "preco": item.get("price", 0),
+                "catalog_product_id": prod_id,
+                "total_sellers": sellers_data.get("paging", {}).get("total", 0),
+                "winner_item_id": winner_item_id,
+                "winner_price": winner_price,
+            }
+            if winner_seller_id == USER_ID:
+                ganhando.append(entry)
+            else:
+                entry["winner_seller_id"] = winner_seller_id
+                perdendo.append(entry)
+        except Exception:
+            pass
+
+    perdendo.sort(key=lambda x: x["titulo"])
+    ganhando.sort(key=lambda x: x["titulo"])
+
+    return {
+        "ganhando": ganhando,
+        "perdendo": perdendo,
+        "total": len(marcados),
     }
 
 
@@ -337,6 +413,7 @@ HTML = """<!DOCTYPE html>
     <div class="tab active" onclick="trocarAba('promo')">Participando</div>
     <div class="tab" onclick="trocarAba('alerta')">Sem Continuidade</div>
     <div class="tab" onclick="trocarAba('sem')">Sem Promoção</div>
+    <div class="tab" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
   </div>
 
   <div id="loading-msg">Carregando dados, aguarde (pode levar 2-3 minutos)...</div>
@@ -379,6 +456,18 @@ HTML = """<!DOCTYPE html>
       <tbody id="tbody-sem"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:30px">Clique em Atualizar</td></tr></tbody>
     </table>
   </div>
+
+  <div id="tab-catalogo" class="tab-content">
+    <div class="filtro">
+      <input type="text" id="busca-catalogo" placeholder="Filtrar por título ou ID..." oninput="filtrarTabela('tabela-catalogo','busca-catalogo')">
+    </div>
+    <table id="tabela-catalogo">
+      <thead><tr>
+        <th>Item ID</th><th>Título</th><th>Seu Preço</th><th>Situação</th><th>Concorrentes</th><th>Preço Ganhador</th><th>Produto Catálogo</th>
+      </tr></thead>
+      <tbody id="tbody-catalogo"><tr><td colspan="7" style="text-align:center;color:#aaa;padding:30px">Clique em Atualizar</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -387,7 +476,7 @@ let dadosGlobais = null;
 function trocarAba(aba) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  const abas = ['promo','alerta','sem'];
+  const abas = ['promo','alerta','sem','catalogo'];
   const idx = abas.indexOf(aba);
   document.querySelectorAll('.tab')[idx].classList.add('active');
   document.getElementById('tab-' + aba).classList.add('active');
@@ -448,6 +537,36 @@ function renderizar(dados) {
       <td>${r.titulo}</td><td>${fmt(r.preco)}</td>`;
     ts.appendChild(tr);
   });
+
+  // Tabela catálogo de marca
+  const tc = document.getElementById('tbody-catalogo');
+  tc.innerHTML = '';
+  const cat = dados.catalogo || {ganhando: [], perdendo: []};
+  const todoscat = [...cat.perdendo, ...cat.ganhando];
+  if (!todoscat.length) {
+    tc.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#aaa;padding:30px">Nenhum anúncio de catálogo encontrado</td></tr>';
+  } else {
+    todoscat.forEach(r => {
+      const ganhando = !r.winner_seller_id;
+      const tr = document.createElement('tr');
+      if (!ganhando) tr.className = 'alerta-row';
+      const situacao = ganhando
+        ? '<span class="badge sim">GANHANDO</span>'
+        : '<span class="badge nao">PERDENDO</span>';
+      const winnerPreco = r.winner_price ? fmt(r.winner_price) : '-';
+      const winnerItem = r.winner_item_id && !ganhando
+        ? `<a href="https://www.mercadolivre.com.br/anuncio/${r.winner_item_id}" target="_blank">${r.winner_item_id}</a>`
+        : '-';
+      tr.innerHTML = `<td><a href="https://www.mercadolivre.com.br/anuncio/${r.item_id}" target="_blank">${r.item_id}</a></td>
+        <td>${r.titulo}</td>
+        <td>${fmt(r.preco)}</td>
+        <td>${situacao}</td>
+        <td>${r.total_sellers}</td>
+        <td>${winnerPreco} ${winnerItem}</td>
+        <td><a href="https://www.mercadolivre.com.br/p/${r.catalog_product_id}" target="_blank">${r.catalog_product_id}</a></td>`;
+      tc.appendChild(tr);
+    });
+  }
 }
 
 function filtrarTabela(tabId, inputId) {

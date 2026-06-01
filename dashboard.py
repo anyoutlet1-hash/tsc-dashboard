@@ -6,6 +6,7 @@ Acesse: http://localhost:5000
 
 import time
 import json
+import threading
 from datetime import datetime, date, timezone, timedelta
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,6 +17,9 @@ from flask import Flask, jsonify, render_template_string
 from auth import get_valid_token
 
 app = Flask(__name__)
+
+# Cache global
+_cache = {"dados": None, "status": "idle", "iniciado_em": None, "atualizado_em": None}
 
 BASE = "https://api.mercadolibre.com"
 USER_ID = 48980675
@@ -452,6 +456,8 @@ function filtrarTabela(tabId, inputId) {
   });
 }
 
+let _polling = null;
+
 async function atualizar() {
   const btn = document.getElementById('btn-atualizar');
   const spinner = document.getElementById('spinner');
@@ -459,14 +465,32 @@ async function atualizar() {
   btn.disabled = true;
   spinner.style.display = 'inline-block';
   loadMsg.style.display = 'block';
+  loadMsg.textContent = 'Iniciando carregamento...';
+
   try {
-    const res = await fetch('/api/dados');
-    const dados = await res.json();
-    dadosGlobais = dados;
-    renderizar(dados);
+    await fetch('/api/atualizar', {method: 'POST'});
+    _polling = setInterval(async () => {
+      const s = await (await fetch('/api/status')).json();
+      loadMsg.textContent = 'Carregando dados... (' + (s.iniciado_em||'') + ')';
+      if (s.status === 'ready') {
+        clearInterval(_polling);
+        const res = await fetch('/api/dados');
+        const dados = await res.json();
+        dadosGlobais = dados;
+        renderizar(dados);
+        btn.disabled = false;
+        spinner.style.display = 'none';
+        loadMsg.style.display = 'none';
+      } else if (s.status && s.status.startsWith('erro')) {
+        clearInterval(_polling);
+        alert('Erro: ' + s.status);
+        btn.disabled = false;
+        spinner.style.display = 'none';
+        loadMsg.style.display = 'none';
+      }
+    }, 5000);
   } catch(e) {
-    alert('Erro ao carregar dados: ' + e.message);
-  } finally {
+    alert('Erro: ' + e.message);
     btn.disabled = false;
     spinner.style.display = 'none';
     loadMsg.style.display = 'none';
@@ -477,15 +501,46 @@ async function atualizar() {
 </html>"""
 
 
+def _carregar_em_background():
+    _cache["status"] = "loading"
+    _cache["iniciado_em"] = datetime.now().strftime("%H:%M:%S")
+    try:
+        dados = carregar_dados()
+        _cache["dados"] = dados
+        _cache["status"] = "ready"
+        _cache["atualizado_em"] = dados["atualizado_em"]
+    except Exception as e:
+        _cache["status"] = f"erro: {e}"
+
+
 @app.route("/")
 def index():
     return render_template_string(HTML)
 
 
+@app.route("/api/atualizar", methods=["POST"])
+def api_atualizar():
+    if _cache["status"] == "loading":
+        return jsonify({"status": "loading", "msg": "Ja carregando..."})
+    t = threading.Thread(target=_carregar_em_background, daemon=True)
+    t.start()
+    return jsonify({"status": "loading", "msg": "Iniciando carregamento..."})
+
+
+@app.route("/api/status")
+def api_status():
+    return jsonify({
+        "status": _cache["status"],
+        "atualizado_em": _cache.get("atualizado_em"),
+        "iniciado_em": _cache.get("iniciado_em"),
+    })
+
+
 @app.route("/api/dados")
 def api_dados():
-    dados = carregar_dados()
-    return jsonify(dados)
+    if _cache["dados"] is None:
+        return jsonify({"erro": "Dados não carregados ainda. Clique em Atualizar."}), 202
+    return jsonify(_cache["dados"])
 
 
 if __name__ == "__main__":

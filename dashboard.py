@@ -161,7 +161,11 @@ def carregar_dados():
         titulo = info.get("title", item_id)
         preco_orig = info.get("price", 0)
 
-        datas_fim = []
+        now = datetime.now(timezone.utc)
+
+        # Separa datas futuras (ativas) e passadas (expiradas)
+        datas_fim_ativas = []
+        datas_fim_todas = []
         for p in promos:
             fd = p.get("finish_date") or p.get("end_time")
             if fd:
@@ -169,15 +173,18 @@ def carregar_dados():
                     dt = datetime.fromisoformat(fd.replace("Z", "+00:00"))
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
-                    datas_fim.append(dt)
+                    datas_fim_todas.append(dt)
+                    if dt > now:
+                        datas_fim_ativas.append(dt)
                 except Exception:
                     pass
 
-        earliest_finish = min(datas_fim) if datas_fim else None
-        latest_finish = max(datas_fim) if datas_fim else None
+        # Usa datas ativas para exibição; se não tiver, considera sem prazo definido
+        earliest_finish = min(datas_fim_ativas) if datas_fim_ativas else None
+        latest_finish = max(datas_fim_ativas) if datas_fim_ativas else None
 
         pendentes = item_promos_pending.get(item_id, [])
-        has_continuity = bool(pendentes) or len(set(str(d) for d in datas_fim)) > 1 or any(
+        has_continuity = bool(pendentes) or len(set(str(d) for d in datas_fim_ativas)) > 1 or any(
             p.get("status") == "candidate" for p in promos
         )
 
@@ -186,7 +193,6 @@ def carregar_dados():
         desconto = round((1 - preco_promo / preco_orig) * 100, 1) if preco_orig else 0
         proximas = [p.get("name") or p.get("type", "?") for p in pendentes]
 
-        now = datetime.now(timezone.utc)
         dias_restantes = None
         if earliest_finish:
             dias_restantes = (earliest_finish - now).days

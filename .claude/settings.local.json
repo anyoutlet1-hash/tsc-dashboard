@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__mercadolivre__get_my_info"
+    ]
+  }
+}

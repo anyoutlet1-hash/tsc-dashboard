@@ -1,0 +1,5 @@
+tokens.json
+*.xlsx
+__pycache__/
+*.pyc
+.env

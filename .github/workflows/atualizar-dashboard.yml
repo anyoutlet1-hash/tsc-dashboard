@@ -1,0 +1,27 @@
+name: Atualizar Dashboard TSC Shop
+
+on:
+  schedule:
+    - cron: '0 10 * * *'  # 7h BRT = 10h UTC
+  workflow_dispatch:       # permite rodar manualmente
+
+jobs:
+  atualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Acorda o servidor
+        run: |
+          curl -s https://tsc-dashboard.onrender.com/ > /dev/null
+          sleep 60
+
+      - name: Dispara atualização
+        run: |
+          curl -s -X POST https://tsc-dashboard.onrender.com/api/atualizar
+
+      - name: Aguarda carregamento (3 min)
+        run: sleep 180
+
+      - name: Verifica status
+        run: |
+          STATUS=$(curl -s https://tsc-dashboard.onrender.com/api/status)
+          echo "Status: $STATUS"

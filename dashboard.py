@@ -498,7 +498,7 @@ HTML = """<!DOCTYPE html>
     <div class="filtro">
       <input type="text" id="busca-sem" placeholder="Filtrar por título ou ID..." oninput="filtrarSemPromo()">
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" id="filtro-sem-estoque" onchange="filtrarSemPromo()"> Ocultar produtos com estoque
+        <input type="checkbox" id="filtro-sem-estoque" onchange="filtrarSemPromo()"> Ocultar produtos sem estoque
       </label>
     </div>
     <table id="tabela-sem">
@@ -632,7 +632,7 @@ function filtrarSemPromo() {
     const txt = tr.textContent.toLowerCase();
     const qtd = parseInt(tr.dataset.qtd || '0');
     const textMatch = txt.includes(busca);
-    const estoqueMatch = !apenasZero || qtd === 0;
+    const estoqueMatch = !apenasZero || qtd > 0;
     tr.style.display = textMatch && estoqueMatch ? '' : 'none';
   });
 }

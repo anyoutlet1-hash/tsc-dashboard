@@ -188,7 +188,7 @@ def carregar_dados():
     titulos = {}
     for i in range(0, len(todos), 20):
         batch = todos[i:i+20]
-        data = _get("/items", params={"ids": ",".join(batch), "attributes": "id,title,price,catalog_listing,catalog_product_id"})
+        data = _get("/items", params={"ids": ",".join(batch), "attributes": "id,title,price,available_quantity,catalog_listing,catalog_product_id"})
         if data:
             for item in (data if isinstance(data, list) else []):
                 body = item.get("body", item)
@@ -196,6 +196,7 @@ def carregar_dados():
                     titulos[body.get("id")] = {
                         "title": body.get("title", ""),
                         "price": body.get("price", 0),
+                        "available_quantity": body.get("available_quantity", 0) or 0,
                         "catalog_listing": body.get("catalog_listing", False),
                         "catalog_product_id": body.get("catalog_product_id", ""),
                     }
@@ -296,7 +297,7 @@ def carregar_dados():
 
     itens_com_promo = set(item_promos_started.keys())
     sem_promo = [
-        {"item_id": iid, "titulo": titulos.get(iid, {}).get("title", iid), "preco": titulos.get(iid, {}).get("price", 0)}
+        {"item_id": iid, "titulo": titulos.get(iid, {}).get("title", iid), "preco": titulos.get(iid, {}).get("price", 0), "qtd": titulos.get(iid, {}).get("available_quantity", 0)}
         for iid in itens_vendidos_30d if iid not in itens_com_promo
     ]
     sem_promo.sort(key=lambda x: x["titulo"])
@@ -495,11 +496,14 @@ HTML = """<!DOCTYPE html>
 
   <div id="tab-sem" class="tab-content">
     <div class="filtro">
-      <input type="text" id="busca-sem" placeholder="Filtrar por título ou ID..." oninput="filtrarTabela('tabela-sem','busca-sem')">
+      <input type="text" id="busca-sem" placeholder="Filtrar por título ou ID..." oninput="filtrarSemPromo()">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+        <input type="checkbox" id="filtro-sem-estoque" onchange="filtrarSemPromo()"> Mostrar apenas sem estoque
+      </label>
     </div>
     <table id="tabela-sem">
-      <thead><tr><th>Item ID</th><th>Título</th><th>Preço Atual</th></tr></thead>
-      <tbody id="tbody-sem"><tr><td colspan="3" style="text-align:center;color:#aaa;padding:30px">Clique em Atualizar</td></tr></tbody>
+      <thead><tr><th>Item ID</th><th>Título</th><th>Preço Atual</th><th>Estoque</th></tr></thead>
+      <tbody id="tbody-sem"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:30px">Clique em Atualizar</td></tr></tbody>
     </table>
   </div>
 
@@ -579,10 +583,15 @@ function renderizar(dados) {
   ts.innerHTML = '';
   dados.sem_promo.forEach(r => {
     const tr = document.createElement('tr');
+    tr.dataset.qtd = r.qtd || 0;
+    const estoqueCell = (r.qtd || 0) === 0
+      ? `<span class="badge nao">0</span>`
+      : `<span class="badge sim">${r.qtd}</span>`;
     tr.innerHTML = `<td><a href="https://www.mercadolivre.com.br/anuncio/${r.item_id}" target="_blank">${r.item_id}</a></td>
-      <td>${r.titulo}</td><td>${fmt(r.preco)}</td>`;
+      <td>${r.titulo}</td><td>${fmt(r.preco)}</td><td>${estoqueCell}</td>`;
     ts.appendChild(tr);
   });
+  filtrarSemPromo();
 
   // Tabela catálogo de marca
   const tc = document.getElementById('tbody-catalogo');
@@ -613,6 +622,19 @@ function renderizar(dados) {
       tc.appendChild(tr);
     });
   }
+}
+
+function filtrarSemPromo() {
+  const busca = document.getElementById('busca-sem').value.toLowerCase();
+  const apenasZero = document.getElementById('filtro-sem-estoque').checked;
+  const rows = document.querySelectorAll('#tabela-sem tbody tr');
+  rows.forEach(tr => {
+    const txt = tr.textContent.toLowerCase();
+    const qtd = parseInt(tr.dataset.qtd || '0');
+    const textMatch = txt.includes(busca);
+    const estoqueMatch = !apenasZero || qtd === 0;
+    tr.style.display = textMatch && estoqueMatch ? '' : 'none';
+  });
 }
 
 function filtrarTabela(tabId, inputId) {

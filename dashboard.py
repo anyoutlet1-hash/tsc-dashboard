@@ -498,7 +498,7 @@ HTML = """<!DOCTYPE html>
     <div class="filtro">
       <input type="text" id="busca-sem" placeholder="Filtrar por título ou ID..." oninput="filtrarSemPromo()">
       <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
-        <input type="checkbox" id="filtro-sem-estoque" onchange="filtrarSemPromo()"> Mostrar apenas sem estoque
+        <input type="checkbox" id="filtro-sem-estoque" onchange="filtrarSemPromo()"> Ocultar produtos com estoque
       </label>
     </div>
     <table id="tabela-sem">

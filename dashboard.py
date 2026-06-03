@@ -230,9 +230,9 @@ def carregar_dados():
         earliest_finish = min(datas_fim_ativas) if datas_fim_ativas else None
         latest_finish = max(datas_fim_ativas) if datas_fim_ativas else None
 
-        pendentes = item_promos_pending.get(item_id, [])
+        pendentes = [p for p in item_promos_pending.get(item_id, []) if p.get("type") != "PRICE_MATCHING"]
         has_continuity = bool(pendentes) or len(set(str(d) for d in datas_fim_ativas)) > 1 or any(
-            p.get("status") == "candidate" for p in promos
+            p.get("status") == "candidate" and p.get("type") != "PRICE_MATCHING" for p in promos
         )
 
         promo_names = [p.get("name") or p.get("type", "?") for p in promos]

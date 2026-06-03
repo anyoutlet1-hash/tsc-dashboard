@@ -277,16 +277,16 @@ def carregar_dados():
     rows_dedup.sort(key=lambda x: x["_earliest"])
 
     # Vendas por período: últimos 15 dias vs 15-30 dias atrás
-    data_30d_str = (date.today() - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00.000-03:00")
-    data_15d_str = (date.today() - timedelta(days=15)).strftime("%Y-%m-%dT00:00:00.000-03:00")
+    data_14d_str = (date.today() - timedelta(days=14)).strftime("%Y-%m-%dT00:00:00.000-03:00")
+    data_7d_str  = (date.today() - timedelta(days=7)).strftime("%Y-%m-%dT00:00:00.000-03:00")
 
-    vendas_recentes = defaultdict(int)    # últimos 15 dias
-    vendas_anteriores = defaultdict(int)  # 15-30 dias atrás
+    vendas_recentes = defaultdict(int)    # últimos 7 dias
+    vendas_anteriores = defaultdict(int)  # 7-14 dias atrás
     itens_vendidos_30d = set()
 
     for params_v, destino in [
-        ({"order.date_created.from": data_15d_str}, vendas_recentes),
-        ({"order.date_created.from": data_30d_str, "order.date_created.to": data_15d_str}, vendas_anteriores),
+        ({"order.date_created.from": data_7d_str}, vendas_recentes),
+        ({"order.date_created.from": data_14d_str, "order.date_created.to": data_7d_str}, vendas_anteriores),
     ]:
         offset_v = 0
         while True:
@@ -321,9 +321,9 @@ def carregar_dados():
     queda_items = []
     for iid, qty_ant in vendas_anteriores.items():
         qty_rec = vendas_recentes.get(iid, 0)
-        if qty_ant < 3:
+        if qty_ant < 2:
             continue
-        if qty_rec >= qty_ant * 0.6:
+        if qty_rec >= qty_ant * 0.8:
             continue
         pct_queda = round((1 - qty_rec / qty_ant) * 100)
         info = titulos.get(iid, {})
@@ -567,7 +567,7 @@ HTML = """<!DOCTYPE html>
     <table id="tabela-queda">
       <thead><tr>
         <th>Item ID</th><th>Título</th><th>Preço</th>
-        <th>Vendas 15-30d atrás</th><th>Vendas últimos 15d</th><th>Queda</th>
+        <th>Vendas 7-14d atrás</th><th>Vendas últimos 7d</th><th>Queda</th>
         <th>Estoque</th><th>Em Promo</th><th>Observação</th>
       </tr></thead>
       <tbody id="tbody-queda"><tr><td colspan="9" style="text-align:center;color:#aaa;padding:30px">Clique em Atualizar</td></tr></tbody>

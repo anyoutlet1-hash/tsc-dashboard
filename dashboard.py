@@ -276,24 +276,35 @@ def carregar_dados():
 
     rows_dedup.sort(key=lambda x: x["_earliest"])
 
-    # Itens sem promoção vendidos 30d
-    data_30d = (date.today() - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00.000-03:00")
+    # Vendas por período: últimos 15 dias vs 15-30 dias atrás
+    data_30d_str = (date.today() - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00.000-03:00")
+    data_15d_str = (date.today() - timedelta(days=15)).strftime("%Y-%m-%dT00:00:00.000-03:00")
+
+    vendas_recentes = defaultdict(int)    # últimos 15 dias
+    vendas_anteriores = defaultdict(int)  # 15-30 dias atrás
     itens_vendidos_30d = set()
-    offset_v = 0
-    while True:
-        data_v = _get("/orders/search", params={"seller": USER_ID, "order.date_created.from": data_30d, "order.status": "paid", "limit": 50, "offset": offset_v})
-        if not data_v:
-            break
-        orders = data_v.get("results", [])
-        for o in orders:
-            for oi in o.get("order_items", []):
-                iid = oi.get("item", {}).get("id")
-                if iid:
-                    itens_vendidos_30d.add(iid)
-        total_v = data_v.get("paging", {}).get("total", 0)
-        offset_v += 50
-        if offset_v >= total_v:
-            break
+
+    for params_v, destino in [
+        ({"order.date_created.from": data_15d_str}, vendas_recentes),
+        ({"order.date_created.from": data_30d_str, "order.date_created.to": data_15d_str}, vendas_anteriores),
+    ]:
+        offset_v = 0
+        while True:
+            data_v = _get("/orders/search", params={"seller": USER_ID, "order.status": "paid", "limit": 50, "offset": offset_v, **params_v})
+            if not data_v:
+                break
+            orders = data_v.get("results", [])
+            for o in orders:
+                for oi in o.get("order_items", []):
+                    iid = oi.get("item", {}).get("id")
+                    qty = oi.get("quantity", 1)
+                    if iid:
+                        destino[iid] += qty
+                        itens_vendidos_30d.add(iid)
+            total_v = data_v.get("paging", {}).get("total", 0)
+            offset_v += 50
+            if offset_v >= total_v:
+                break
 
     itens_com_promo = set(item_promos_started.keys())
     sem_promo = [
@@ -302,8 +313,46 @@ def carregar_dados():
     ]
     sem_promo.sort(key=lambda x: x["titulo"])
 
-    # Catálogo de marcas
+    # Catálogo antecipado para usar na análise de queda
     catalogo = carregar_catalogo()
+    ids_perdendo_catalogo = set(c["item_id"] for c in catalogo.get("perdendo", []))
+
+    # Análise de queda de vendas
+    queda_items = []
+    for iid, qty_ant in vendas_anteriores.items():
+        qty_rec = vendas_recentes.get(iid, 0)
+        if qty_ant < 3:
+            continue
+        if qty_rec >= qty_ant * 0.6:
+            continue
+        pct_queda = round((1 - qty_rec / qty_ant) * 100)
+        info = titulos.get(iid, {})
+        qtd_estoque = info.get("available_quantity", 0)
+        em_promo = iid in itens_com_promo
+        obs_lista = []
+        if qtd_estoque == 0:
+            obs_lista.append("Sem estoque — produto pausado ou esgotado")
+        if not em_promo:
+            obs_lista.append("Sem promoção ativa no período recente")
+        if iid in ids_perdendo_catalogo:
+            obs_lista.append("Perdendo buy box no catálogo")
+        if not obs_lista:
+            if pct_queda >= 70:
+                obs_lista.append("Queda acentuada — verificar preço e concorrência")
+            else:
+                obs_lista.append("Redução moderada nas vendas — monitorar")
+        queda_items.append({
+            "item_id": iid,
+            "titulo": info.get("title", iid),
+            "preco": info.get("price", 0),
+            "vendas_rec": qty_rec,
+            "vendas_ant": qty_ant,
+            "pct_queda": pct_queda,
+            "estoque": qtd_estoque,
+            "em_promo": em_promo,
+            "observacao": " | ".join(obs_lista),
+        })
+    queda_items.sort(key=lambda x: -x["pct_queda"])
 
     return {
         "atualizado_em": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
@@ -311,8 +360,10 @@ def carregar_dados():
         "com_continuidade": sum(1 for r in rows_dedup if r["continuidade"] == "SIM"),
         "sem_continuidade": sum(1 for r in rows_dedup if r["continuidade"] == "NAO"),
         "sem_promo_count": len(sem_promo),
+        "queda_count": len(queda_items),
         "promocoes": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows_dedup],
         "sem_promo": sem_promo[:50],
+        "queda": queda_items,
         "catalogo": catalogo,
     }
 
@@ -453,6 +504,7 @@ HTML = """<!DOCTYPE html>
   <div class="card verde"><div class="label">Com Continuidade</div><div class="valor" id="c-sim">—</div></div>
   <div class="card vermelho"><div class="label">Sem Continuidade</div><div class="valor" id="c-nao">—</div></div>
   <div class="card cinza"><div class="label">Vendidos sem Promo (30d)</div><div class="valor" id="c-sem">—</div></div>
+  <div class="card vermelho"><div class="label">Queda de Vendas</div><div class="valor" id="c-queda">—</div></div>
 </div>
 
 <div class="section">
@@ -460,6 +512,7 @@ HTML = """<!DOCTYPE html>
     <div class="tab active" onclick="trocarAba('promo')">Participando</div>
     <div class="tab" onclick="trocarAba('alerta')">Sem Continuidade</div>
     <div class="tab" onclick="trocarAba('sem')">Sem Promoção</div>
+    <div class="tab" onclick="trocarAba('queda')">Queda de Vendas</div>
     <div class="tab" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
   </div>
 
@@ -507,6 +560,20 @@ HTML = """<!DOCTYPE html>
     </table>
   </div>
 
+  <div id="tab-queda" class="tab-content">
+    <div class="filtro">
+      <input type="text" id="busca-queda" placeholder="Filtrar por título ou ID..." oninput="filtrarTabela('tabela-queda','busca-queda')">
+    </div>
+    <table id="tabela-queda">
+      <thead><tr>
+        <th>Item ID</th><th>Título</th><th>Preço</th>
+        <th>Vendas 15-30d atrás</th><th>Vendas últimos 15d</th><th>Queda</th>
+        <th>Estoque</th><th>Em Promo</th><th>Observação</th>
+      </tr></thead>
+      <tbody id="tbody-queda"><tr><td colspan="9" style="text-align:center;color:#aaa;padding:30px">Clique em Atualizar</td></tr></tbody>
+    </table>
+  </div>
+
   <div id="tab-catalogo" class="tab-content">
     <div class="filtro">
       <input type="text" id="busca-catalogo" placeholder="Filtrar por título ou ID..." oninput="filtrarTabela('tabela-catalogo','busca-catalogo')">
@@ -526,7 +593,7 @@ let dadosGlobais = null;
 function trocarAba(aba) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  const abas = ['promo','alerta','sem','catalogo'];
+  const abas = ['promo','alerta','sem','queda','catalogo'];
   const idx = abas.indexOf(aba);
   document.querySelectorAll('.tab')[idx].classList.add('active');
   document.getElementById('tab-' + aba).classList.add('active');
@@ -539,6 +606,7 @@ function renderizar(dados) {
   document.getElementById('c-sim').textContent = dados.com_continuidade;
   document.getElementById('c-nao').textContent = dados.sem_continuidade;
   document.getElementById('c-sem').textContent = dados.sem_promo_count;
+  document.getElementById('c-queda').textContent = dados.queda_count || 0;
   document.getElementById('atualizado').textContent = 'Atualizado em: ' + dados.atualizado_em;
 
   // Tabela principal
@@ -592,6 +660,36 @@ function renderizar(dados) {
     ts.appendChild(tr);
   });
   filtrarSemPromo();
+
+  // Tabela queda de vendas
+  const tq = document.getElementById('tbody-queda');
+  tq.innerHTML = '';
+  const queda = dados.queda || [];
+  if (!queda.length) {
+    tq.innerHTML = '<tr><td colspan="9" style="text-align:center;color:#2e7d32;padding:30px">Nenhuma queda significativa detectada!</td></tr>';
+  } else {
+    queda.forEach(r => {
+      const tr = document.createElement('tr');
+      tr.className = 'alerta-row';
+      const quedaBadge = `<span class="badge nao">-${r.pct_queda}%</span>`;
+      const estoqueBadge = r.estoque === 0
+        ? `<span class="badge nao">0</span>`
+        : `<span class="badge sim">${r.estoque}</span>`;
+      const promoBadge = r.em_promo
+        ? `<span class="badge sim">SIM</span>`
+        : `<span class="badge nao">NÃO</span>`;
+      tr.innerHTML = `<td><a href="https://www.mercadolivre.com.br/anuncio/${r.item_id}" target="_blank">${r.item_id}</a></td>
+        <td>${r.titulo}</td>
+        <td>${fmt(r.preco)}</td>
+        <td style="text-align:center">${r.vendas_ant}</td>
+        <td style="text-align:center">${r.vendas_rec}</td>
+        <td style="text-align:center">${quedaBadge}</td>
+        <td style="text-align:center">${estoqueBadge}</td>
+        <td style="text-align:center">${promoBadge}</td>
+        <td style="font-size:12px;color:#555">${r.observacao}</td>`;
+      tq.appendChild(tr);
+    });
+  }
 
   // Tabela catálogo de marca
   const tc = document.getElementById('tbody-catalogo');

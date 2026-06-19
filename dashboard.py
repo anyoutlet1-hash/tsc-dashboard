@@ -806,6 +806,31 @@ async function atualizar() {
   }
 }
 
+// Auto-carregar dados se já disponíveis
+window.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    if (s.status === 'ready') {
+      const res = await fetch('/api/dados');
+      const dados = await res.json();
+      if (!dados.erro) { dadosGlobais = dados; renderizar(dados); }
+    } else if (s.status === 'loading') {
+      document.getElementById('loading-msg').style.display = 'block';
+      document.getElementById('loading-msg').textContent = 'Dados carregando automaticamente...';
+      const poll = setInterval(async () => {
+        const st = await (await fetch('/api/status')).json();
+        if (st.status === 'ready') {
+          clearInterval(poll);
+          const r = await fetch('/api/dados');
+          const d = await r.json();
+          dadosGlobais = d; renderizar(d);
+          document.getElementById('loading-msg').style.display = 'none';
+        }
+      }, 5000);
+    }
+  } catch(e) {}
+});
+
 async function carregarZP() {
   const btn = document.getElementById('btn-zp');
   const loading = document.getElementById('zp-loading');
@@ -1160,6 +1185,73 @@ def _loop_monitor_zp():
 # Inicia monitor em background
 _t_monitor = threading.Thread(target=_loop_monitor_zp, daemon=True)
 _t_monitor.start()
+
+
+# ── Pré-carregamento automático ao iniciar ────────────────────────────────────
+
+def _precarregar_dados():
+    """Carrega dados automaticamente ao iniciar o servidor."""
+    time.sleep(5)  # espera o servidor subir
+    print("[Preload] Carregando dados automaticamente...", flush=True)
+    _cache["status"] = "loading"
+    _cache["iniciado_em"] = datetime.now().strftime("%H:%M:%S")
+    try:
+        dados = carregar_dados()
+        _cache["dados"] = dados
+        _cache["status"] = "ready"
+        _cache["atualizado_em"] = dados["atualizado_em"]
+        print(f"[Preload] Dados carregados com sucesso! {dados['total_em_promo']} promos.", flush=True)
+    except Exception as e:
+        _cache["status"] = f"erro: {e}"
+        print(f"[Preload] Erro ao carregar: {e}", flush=True)
+
+_t_preload = threading.Thread(target=_precarregar_dados, daemon=True)
+_t_preload.start()
+
+
+# ── Auto-refresh a cada 30 min ────────────────────────────────────────────────
+
+def _loop_refresh():
+    """Atualiza os dados automaticamente a cada 30 minutos."""
+    while True:
+        time.sleep(30 * 60)
+        if _cache["status"] == "loading":
+            continue
+        print("[AutoRefresh] Atualizando dados...", flush=True)
+        _cache["status"] = "loading"
+        _cache["iniciado_em"] = datetime.now().strftime("%H:%M:%S")
+        try:
+            dados = carregar_dados()
+            _cache["dados"] = dados
+            _cache["status"] = "ready"
+            _cache["atualizado_em"] = dados["atualizado_em"]
+            print(f"[AutoRefresh] Atualizado! {dados['total_em_promo']} promos.", flush=True)
+        except Exception as e:
+            _cache["status"] = f"erro: {e}"
+            print(f"[AutoRefresh] Erro: {e}", flush=True)
+
+_t_refresh = threading.Thread(target=_loop_refresh, daemon=True)
+_t_refresh.start()
+
+
+# ── Self-ping para manter o Render acordado ───────────────────────────────────
+
+def _loop_ping():
+    """Pinga o próprio servidor a cada 14 min para evitar que o Render durma."""
+    url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if not url:
+        print("[Ping] RENDER_EXTERNAL_URL não configurada, ping desativado.", flush=True)
+        return
+    while True:
+        time.sleep(14 * 60)
+        try:
+            r = req.get(f"{url}/login", timeout=10)
+            print(f"[Ping] {r.status_code} — servidor acordado.", flush=True)
+        except Exception as e:
+            print(f"[Ping] Erro: {e}", flush=True)
+
+_t_ping = threading.Thread(target=_loop_ping, daemon=True)
+_t_ping.start()
 
 
 if __name__ == "__main__":

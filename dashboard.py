@@ -93,9 +93,12 @@ def _get(path, params=None, retries=3):
             if r.status_code == 429:
                 time.sleep(2 ** (attempt + 1))
                 continue
-            r.raise_for_status()
+            if not r.ok:
+                print(f"[ML API] {r.status_code} em {path}: {r.text[:200]}", flush=True)
+                return None
             return r.json()
-        except Exception:
+        except Exception as e:
+            print(f"[ML API] Erro tentativa {attempt+1} em {path}: {e}", flush=True)
             if attempt == retries - 1:
                 return None
             time.sleep(1)
@@ -821,6 +824,21 @@ def logout():
     return redirect("/login")
 
 
+@app.route("/api/debug-token")
+@login_required
+def debug_token():
+    try:
+        token = get_valid_token()
+        r = req.get(f"{BASE}/users/me", headers={"Authorization": f"Bearer {token}"}, timeout=10)
+        return jsonify({
+            "status": r.status_code,
+            "token_prefix": token[:10] + "..." if token else None,
+            "resposta": r.json() if r.ok else r.text[:300]
+        })
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
+
+
 @app.route("/")
 @login_required
 def index():
@@ -853,6 +871,165 @@ def api_dados():
     if _cache["dados"] is None:
         return jsonify({"erro": "Dados não carregados ainda. Clique em Atualizar."}), 202
     return jsonify(_cache["dados"])
+
+
+SKUS_ZP = [
+    "ZP BRANCO/LARANJA", "ZP Preta/azul", "ZP preta/rosa", "ZP PRETA/VERDE",
+    "ZP CINZA/PRETO", "ZP PRETO", "ZP preto/amarelo", "ZP PRETO/AQUA",
+    "ZP PRETO/BRANCO", "ZP PRETA/CINZA", "ZP PRETO/ROXO", "ZP PRETO/LARANJA",
+    "ZP preta/rosa", "ZP branca/verde", "ZP Preta/vermelha"
+]
+SKUS_ZP_NORM = [s.upper().strip() for s in SKUS_ZP]
+
+
+def _buscar_estoque_zp():
+    """Busca todos os itens e retorna variações com SKUs ZP."""
+    # 1. Buscar todos os IDs
+    todos = []
+    params = {"search_type": "scan", "limit": 100}
+    while True:
+        data = _get(f"/users/{USER_ID}/items/search", params=params)
+        if not data:
+            break
+        ids = data.get("results", [])
+        todos.extend(ids)
+        scroll_id = data.get("scroll_id")
+        if not scroll_id or not ids:
+            break
+        params = {"search_type": "scan", "scroll_id": scroll_id, "limit": 100}
+
+    # 2. Buscar detalhes em batch com variações
+    resultados = []
+    for i in range(0, len(todos), 20):
+        batch = todos[i:i+20]
+        data = _get("/items", params={
+            "ids": ",".join(batch),
+            "attributes": "id,title,variations,available_quantity,seller_custom_field"
+        })
+        if not data:
+            continue
+        for item in (data if isinstance(data, list) else []):
+            body = item.get("body", item)
+            if not body:
+                continue
+            item_id = body.get("id", "")
+            title = body.get("title", "")
+            variations = body.get("variations", [])
+
+            if variations:
+                for v in variations:
+                    sku = (v.get("seller_custom_field") or "").upper().strip()
+                    if sku in SKUS_ZP_NORM:
+                        resultados.append({
+                            "item_id": item_id,
+                            "titulo": title,
+                            "sku": v.get("seller_custom_field", ""),
+                            "estoque": v.get("available_quantity", 0) or 0,
+                            "variation_id": v.get("id", ""),
+                        })
+            else:
+                sku = (body.get("seller_custom_field") or "").upper().strip()
+                if sku in SKUS_ZP_NORM:
+                    resultados.append({
+                        "item_id": item_id,
+                        "titulo": title,
+                        "sku": body.get("seller_custom_field", ""),
+                        "estoque": body.get("available_quantity", 0) or 0,
+                        "variation_id": None,
+                    })
+
+    # Ordenar por SKU
+    resultados.sort(key=lambda x: x["sku"].upper())
+    return resultados
+
+
+ESTOQUE_ZP_HTML = """<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estoque ZP — TSC Shop</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: white; min-height: 100vh; padding: 24px; }
+  h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; color: #00d4aa; }
+  .sub { font-size: 13px; color: #888; margin-bottom: 24px; }
+  .btn { display: inline-block; padding: 8px 18px; background: #00d4aa; color: #1a1a2e; border: none; border-radius: 6px; font-weight: 700; font-size: 13px; cursor: pointer; text-decoration: none; margin-bottom: 20px; }
+  .btn:hover { background: #00b894; }
+  .btn-back { background: #333; color: white; margin-right: 10px; }
+  table { width: 100%; border-collapse: collapse; background: #16213e; border-radius: 10px; overflow: hidden; }
+  th { background: #0f3460; color: #aaa; font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 12px 16px; text-align: left; }
+  td { padding: 11px 16px; font-size: 13px; border-bottom: 1px solid #1e2d4a; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1e2d4a; }
+  .sku { font-family: monospace; font-weight: 700; color: #4fc3f7; font-size: 13px; }
+  .estoque-ok { color: #00d4aa; font-weight: 700; font-size: 15px; }
+  .estoque-baixo { color: #ffd700; font-weight: 700; font-size: 15px; }
+  .estoque-zero { color: #ff6b6b; font-weight: 700; font-size: 15px; }
+  .titulo { color: #ccc; font-size: 12px; max-width: 400px; }
+  .item-id { font-size: 11px; color: #666; }
+  .loading { text-align: center; padding: 60px; color: #888; font-size: 15px; }
+  .total-row td { background: #0f3460; font-weight: 700; color: white; }
+  .tag-zero { display: inline-block; background: #ff6b6b22; color: #ff6b6b; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 6px; }
+  .tag-baixo { display: inline-block; background: #ffd70022; color: #ffd700; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 6px; }
+</style>
+</head>
+<body>
+<h1>📦 Estoque ZP — TSC Shop</h1>
+<div class="sub">Variações de produtos com SKU ZP</div>
+<a href="/" class="btn btn-back">← Dashboard</a>
+<button class="btn" onclick="carregar()">🔄 Atualizar</button>
+<div id="conteudo"><div class="loading">Carregando estoque... aguarde</div></div>
+
+<script>
+function carregar() {
+  document.getElementById('conteudo').innerHTML = '<div class="loading">Buscando estoque no ML... pode demorar ~30s</div>';
+  fetch('/api/estoque-zp')
+    .then(r => r.json())
+    .then(data => {
+      if (data.erro) { document.getElementById('conteudo').innerHTML = '<div class="loading" style="color:#ff6b6b">' + data.erro + '</div>'; return; }
+      const itens = data.itens || [];
+      if (!itens.length) { document.getElementById('conteudo').innerHTML = '<div class="loading">Nenhum produto ZP encontrado.</div>'; return; }
+      const totalEstoque = itens.reduce((s, i) => s + i.estoque, 0);
+      const zeros = itens.filter(i => i.estoque === 0).length;
+      const baixos = itens.filter(i => i.estoque > 0 && i.estoque <= 5).length;
+      let html = '<table><thead><tr><th>SKU</th><th>Produto</th><th style="text-align:center">Estoque</th><th>MLB</th></tr></thead><tbody>';
+      itens.forEach(i => {
+        const cls = i.estoque === 0 ? 'estoque-zero' : i.estoque <= 5 ? 'estoque-baixo' : 'estoque-ok';
+        const tag = i.estoque === 0 ? '<span class="tag-zero">SEM ESTOQUE</span>' : i.estoque <= 5 ? '<span class="tag-baixo">BAIXO</span>' : '';
+        html += '<tr>';
+        html += '<td><span class="sku">' + i.sku + '</span></td>';
+        html += '<td><div class="titulo">' + i.titulo + '</div></td>';
+        html += '<td style="text-align:center"><span class="' + cls + '">' + i.estoque + ' un.' + tag + '</span></td>';
+        html += '<td><span class="item-id"><a href="https://www.mercadolivre.com.br/p/' + i.item_id + '" target="_blank" style="color:#4fc3f7">' + i.item_id + '</a></span></td>';
+        html += '</tr>';
+      });
+      html += '<tr class="total-row"><td colspan="2">TOTAL</td><td style="text-align:center">' + totalEstoque + ' un.</td><td>' + zeros + ' sem estoque · ' + baixos + ' baixo</td></tr>';
+      html += '</tbody></table>';
+      document.getElementById('conteudo').innerHTML = html;
+    })
+    .catch(e => { document.getElementById('conteudo').innerHTML = '<div class="loading" style="color:#ff6b6b">Erro: ' + e + '</div>'; });
+}
+carregar();
+</script>
+</body>
+</html>"""
+
+
+@app.route("/estoque-zp")
+@login_required
+def estoque_zp():
+    return render_template_string(ESTOQUE_ZP_HTML)
+
+
+@app.route("/api/estoque-zp")
+@login_required
+def api_estoque_zp():
+    try:
+        itens = _buscar_estoque_zp()
+        return jsonify({"itens": itens, "total": len(itens)})
+    except Exception as e:
+        return jsonify({"erro": str(e)}), 500
 
 
 if __name__ == "__main__":

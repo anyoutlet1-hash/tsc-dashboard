@@ -1032,6 +1032,76 @@ def api_estoque_zp():
         return jsonify({"erro": str(e)}), 500
 
 
+# ── Monitor de estoque ZP ──────────────────────────────────────────────────────
+import smtplib
+from email.mime.text import MIMEText
+from config import GMAIL_USER, GMAIL_APP_PASSWORD, NOTIFY_EMAIL
+
+ALERTA_ESTOQUE = 1000
+_zp_alertas_enviados = set()  # SKUs já notificados (reseta ao reiniciar)
+
+
+def _enviar_email_alerta(itens_baixos):
+    if not GMAIL_USER or not GMAIL_APP_PASSWORD:
+        print("[ZP Monitor] Email não configurado, pulando notificação.", flush=True)
+        return
+    destinatario = NOTIFY_EMAIL or GMAIL_USER
+    linhas = "\n".join(f"  • {i['sku']}: {i['estoque']} un  (item {i['item_id']})" for i in itens_baixos)
+    corpo = f"""⚠️ ALERTA DE ESTOQUE ZP — TSC Shop
+
+Os seguintes SKUs atingiram {ALERTA_ESTOQUE} unidades ou menos:
+
+{linhas}
+
+Verifique no Mercado Livre e programe reposição.
+
+— Dashboard TSC Shop ({datetime.now().strftime('%d/%m/%Y %H:%M')})
+"""
+    msg = MIMEText(corpo, "plain", "utf-8")
+    msg["Subject"] = f"⚠️ Estoque ZP baixo ({len(itens_baixos)} SKU{'s' if len(itens_baixos)>1 else ''})"
+    msg["From"] = GMAIL_USER
+    msg["To"] = destinatario
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as s:
+            s.login(GMAIL_USER, GMAIL_APP_PASSWORD)
+            s.sendmail(GMAIL_USER, destinatario, msg.as_string())
+        print(f"[ZP Monitor] Email enviado para {destinatario}: {[i['sku'] for i in itens_baixos]}", flush=True)
+    except Exception as e:
+        print(f"[ZP Monitor] Erro ao enviar email: {e}", flush=True)
+
+
+def _loop_monitor_zp():
+    """Roda em background, verifica estoque ZP a cada 6h."""
+    global _zp_alertas_enviados
+    while True:
+        time.sleep(6 * 3600)
+        try:
+            print("[ZP Monitor] Verificando estoque ZP...", flush=True)
+            itens = _buscar_estoque_zp()
+            novos_baixos = []
+            for item in itens:
+                sku = item.get("sku", "")
+                estoque = item.get("estoque", 9999)
+                if estoque <= ALERTA_ESTOQUE and sku not in _zp_alertas_enviados:
+                    novos_baixos.append(item)
+                    _zp_alertas_enviados.add(sku)
+                elif estoque > ALERTA_ESTOQUE and sku in _zp_alertas_enviados:
+                    # Reposto: reseta alerta para notificar novamente se baixar
+                    _zp_alertas_enviados.discard(sku)
+            if novos_baixos:
+                print(f"[ZP Monitor] {len(novos_baixos)} SKU(s) com estoque baixo!", flush=True)
+                _enviar_email_alerta(novos_baixos)
+            else:
+                print(f"[ZP Monitor] Tudo ok. {len(itens)} SKUs verificados.", flush=True)
+        except Exception as e:
+            print(f"[ZP Monitor] Erro na verificação: {e}", flush=True)
+
+
+# Inicia monitor em background
+_t_monitor = threading.Thread(target=_loop_monitor_zp, daemon=True)
+_t_monitor.start()
+
+
 if __name__ == "__main__":
     import os
     port = int(os.environ.get("PORT", 5000))

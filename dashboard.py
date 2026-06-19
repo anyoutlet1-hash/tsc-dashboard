@@ -517,6 +517,7 @@ HTML = """<!DOCTYPE html>
     <div class="tab" onclick="trocarAba('sem')">Sem Promoção</div>
     <div class="tab" onclick="trocarAba('queda')">Queda de Vendas</div>
     <div class="tab" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
+    <div class="tab" onclick="window.location='/estoque-zp'">Estoque ZP</div>
   </div>
 
   <div id="loading-msg">Carregando dados, aguarde (pode levar 2-3 minutos)...</div>

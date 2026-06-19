@@ -517,7 +517,7 @@ HTML = """<!DOCTYPE html>
     <div class="tab" onclick="trocarAba('sem')">Sem Promoção</div>
     <div class="tab" onclick="trocarAba('queda')">Queda de Vendas</div>
     <div class="tab" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
-    <div class="tab" onclick="window.location='/estoque-zp'">Estoque ZP</div>
+    <div class="tab" onclick="trocarAba('zp')">Estoque ZP</div>
   </div>
 
   <div id="loading-msg">Carregando dados, aguarde (pode levar 2-3 minutos)...</div>
@@ -589,6 +589,20 @@ HTML = """<!DOCTYPE html>
       <tbody id="tbody-catalogo"><tr><td colspan="7" style="text-align:center;color:#aaa;padding:30px">Clique em Atualizar</td></tr></tbody>
     </table>
   </div>
+
+  <div id="tab-zp" class="tab-content">
+    <div class="filtro">
+      <input type="text" id="busca-zp" placeholder="Filtrar por SKU ou título..." oninput="filtrarTabela('tabela-zp','busca-zp')">
+      <button class="btn" onclick="carregarZP()" id="btn-zp" style="padding:7px 16px;font-size:13px;">Carregar Estoque</button>
+      <span id="zp-loading" style="display:none;color:#888;font-size:13px;">Buscando no ML... ~30s</span>
+    </div>
+    <table id="tabela-zp">
+      <thead><tr>
+        <th>SKU</th><th>Produto</th><th style="text-align:center">Estoque</th><th>Item ID</th>
+      </tr></thead>
+      <tbody id="tbody-zp"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:30px">Clique em "Carregar Estoque"</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -597,7 +611,7 @@ let dadosGlobais = null;
 function trocarAba(aba) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  const abas = ['promo','alerta','sem','queda','catalogo'];
+  const abas = ['promo','alerta','sem','queda','catalogo','zp'];
   const idx = abas.indexOf(aba);
   document.querySelectorAll('.tab')[idx].classList.add('active');
   document.getElementById('tab-' + aba).classList.add('active');
@@ -789,6 +803,51 @@ async function atualizar() {
     btn.disabled = false;
     spinner.style.display = 'none';
     loadMsg.style.display = 'none';
+  }
+}
+
+async function carregarZP() {
+  const btn = document.getElementById('btn-zp');
+  const loading = document.getElementById('zp-loading');
+  btn.disabled = true;
+  loading.style.display = 'inline';
+  try {
+    const res = await fetch('/api/estoque-zp');
+    const data = await res.json();
+    if (data.erro) { alert('Erro: ' + data.erro); return; }
+    const itens = data.itens || [];
+    const tb = document.getElementById('tbody-zp');
+    tb.innerHTML = '';
+    if (!itens.length) {
+      tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#aaa;padding:30px">Nenhum SKU ZP encontrado</td></tr>';
+      return;
+    }
+    let totalEstoque = 0;
+    itens.forEach(i => {
+      totalEstoque += i.estoque;
+      const tr = document.createElement('tr');
+      let badge;
+      if (i.estoque === 0) badge = '<span class="badge nao">0 un. SEM ESTOQUE</span>';
+      else if (i.estoque <= 5) badge = '<span class="badge aviso">' + i.estoque + ' un. BAIXO</span>';
+      else badge = '<span class="badge sim">' + i.estoque + ' un.</span>';
+      tr.innerHTML = '<td><b>' + i.sku + '</b></td>' +
+        '<td>' + i.titulo + '</td>' +
+        '<td style="text-align:center">' + badge + '</td>' +
+        '<td><a href="https://www.mercadolivre.com.br/anuncio/' + i.item_id + '" target="_blank">' + i.item_id + '</a></td>';
+      tb.appendChild(tr);
+    });
+    const zeros = itens.filter(i => i.estoque === 0).length;
+    const baixos = itens.filter(i => i.estoque > 0 && i.estoque <= 5).length;
+    const trTotal = document.createElement('tr');
+    trTotal.style.background = '#f0f2f5';
+    trTotal.style.fontWeight = '700';
+    trTotal.innerHTML = '<td colspan="2">TOTAL</td><td style="text-align:center">' + totalEstoque + ' un.</td><td>' + zeros + ' sem estoque · ' + baixos + ' baixo</td>';
+    tb.appendChild(trTotal);
+  } catch(e) {
+    alert('Erro: ' + e);
+  } finally {
+    btn.disabled = false;
+    loading.style.display = 'none';
   }
 }
 </script>

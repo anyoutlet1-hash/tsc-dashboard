@@ -495,7 +495,7 @@ HTML = """<!DOCTYPE html>
 <header>
   <div>
     <h1>TSC Shop — Promoções</h1>
-    <div id="atualizado">Clique em Atualizar para carregar os dados</div>
+    <div id="atualizado">Carregando dados automaticamente...</div>
   </div>
   <button class="btn" id="btn-atualizar" onclick="atualizar()">
     Atualizar <span class="spinner" id="spinner"></span>
@@ -807,28 +807,44 @@ async function atualizar() {
 }
 
 // Auto-carregar dados se já disponíveis
-window.addEventListener('DOMContentLoaded', async () => {
-  try {
-    const s = await (await fetch('/api/status')).json();
-    if (s.status === 'ready') {
-      const res = await fetch('/api/dados');
-      const dados = await res.json();
-      if (!dados.erro) { dadosGlobais = dados; renderizar(dados); }
-    } else if (s.status === 'loading') {
-      document.getElementById('loading-msg').style.display = 'block';
-      document.getElementById('loading-msg').textContent = 'Dados carregando automaticamente...';
-      const poll = setInterval(async () => {
-        const st = await (await fetch('/api/status')).json();
-        if (st.status === 'ready') {
-          clearInterval(poll);
-          const r = await fetch('/api/dados');
-          const d = await r.json();
-          dadosGlobais = d; renderizar(d);
-          document.getElementById('loading-msg').style.display = 'none';
+window.addEventListener('DOMContentLoaded', () => {
+  const loadMsg = document.getElementById('loading-msg');
+  const btn = document.getElementById('btn-atualizar');
+  const spinner = document.getElementById('spinner');
+
+  async function tentarCarregar() {
+    try {
+      const s = await (await fetch('/api/status')).json();
+      if (s.status === 'ready') {
+        const res = await fetch('/api/dados');
+        const dados = await res.json();
+        if (!dados.erro) {
+          dadosGlobais = dados;
+          renderizar(dados);
+          loadMsg.style.display = 'none';
+          btn.disabled = false;
+          spinner.style.display = 'none';
         }
-      }, 5000);
+        return true;
+      } else if (s.status === 'loading') {
+        loadMsg.style.display = 'block';
+        loadMsg.textContent = 'Dados carregando automaticamente... aguarde (~2 min)';
+        btn.disabled = true;
+        spinner.style.display = 'inline-block';
+        return false;
+      }
+    } catch(e) {}
+    return false;
+  }
+
+  tentarCarregar().then(pronto => {
+    if (!pronto) {
+      const poll = setInterval(async () => {
+        const ok = await tentarCarregar();
+        if (ok) clearInterval(poll);
+      }, 3000);
     }
-  } catch(e) {}
+  });
 });
 
 async function carregarZP() {
@@ -941,7 +957,6 @@ def api_atualizar():
 
 
 @app.route("/api/status")
-@login_required
 def api_status():
     return jsonify({
         "status": _cache["status"],

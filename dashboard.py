@@ -518,6 +518,7 @@ HTML = """<!DOCTYPE html>
     <div class="tab" onclick="trocarAba('queda')">Queda de Vendas</div>
     <div class="tab" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
     <div class="tab" onclick="trocarAba('zp')">Estoque ZP</div>
+    <div class="tab" onclick="trocarAba('xr')">Estoque XR</div>
   </div>
 
   <div id="loading-msg">Carregando dados, aguarde (pode levar 2-3 minutos)...</div>
@@ -603,6 +604,18 @@ HTML = """<!DOCTYPE html>
       <tbody id="tbody-zp"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:30px">Clique em "Carregar Estoque"</td></tr></tbody>
     </table>
   </div>
+
+  <div id="tab-xr" class="tab-content">
+    <div class="filtro">
+      <input type="text" id="busca-xr" placeholder="Filtrar por SKU ou título..." oninput="filtrarTabela('tabela-xr','busca-xr')">
+      <button class="btn" onclick="carregarXR()" id="btn-xr" style="padding:7px 16px;font-size:13px;">Carregar Estoque</button>
+      <span id="xr-loading" style="display:none;color:#888;font-size:13px;">Buscando no ML... ~30s</span>
+    </div>
+    <table id="tabela-xr">
+      <thead><tr><th>SKU</th><th>Produto</th><th style="text-align:center">Estoque</th><th>Item ID</th></tr></thead>
+      <tbody id="tbody-xr"><tr><td colspan="4" style="text-align:center;color:#aaa;padding:30px">Clique em "Carregar Estoque"</td></tr></tbody>
+    </table>
+  </div>
 </div>
 
 <script>
@@ -611,7 +624,7 @@ let dadosGlobais = null;
 function trocarAba(aba) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  const abas = ['promo','alerta','sem','queda','catalogo','zp'];
+  const abas = ['promo','alerta','sem','queda','catalogo','zp','xr'];
   const idx = abas.indexOf(aba);
   document.querySelectorAll('.tab')[idx].classList.add('active');
   document.getElementById('tab-' + aba).classList.add('active');
@@ -891,6 +904,30 @@ async function carregarZP() {
     loading.style.display = 'none';
   }
 }
+
+async function carregarXR() {
+  const btn = document.getElementById('btn-xr'), loading = document.getElementById('xr-loading');
+  btn.disabled = true; loading.style.display = 'inline';
+  try {
+    const data = await fetch('/api/estoque-xr').then(r=>r.json());
+    if (data.erro) { alert('Erro: ' + data.erro); return; }
+    const itens = data.itens || [], tb = document.getElementById('tbody-xr');
+    tb.innerHTML = '';
+    if (!itens.length) { tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#aaa;padding:30px">Nenhum SKU XR encontrado</td></tr>'; return; }
+    let tot = 0;
+    itens.forEach(i => {
+      tot += i.estoque;
+      const tr = document.createElement('tr');
+      const b = i.estoque===0 ? '<span class="badge nao">0 SEM ESTOQUE</span>' : i.estoque<=5 ? '<span class="badge aviso">'+i.estoque+' BAIXO</span>' : '<span class="badge sim">'+i.estoque+' un.</span>';
+      tr.innerHTML = '<td><b>'+i.sku+'</b></td><td>'+i.titulo+'</td><td style="text-align:center">'+b+'</td><td><a href="https://www.mercadolivre.com.br/anuncio/'+i.item_id+'" target="_blank">'+i.item_id+'</a></td>';
+      tb.appendChild(tr);
+    });
+    const z=itens.filter(i=>i.estoque===0).length, bx=itens.filter(i=>i.estoque>0&&i.estoque<=5).length;
+    const tt=document.createElement('tr'); tt.style.cssText='background:#f0f2f5;font-weight:700';
+    tt.innerHTML='<td colspan="2">TOTAL</td><td style="text-align:center">'+tot+' un.</td><td>'+z+' sem estoque · '+bx+' baixo</td>';
+    tb.appendChild(tt);
+  } catch(e){alert('Erro: '+e);} finally{btn.disabled=false;loading.style.display='none';}
+}
 </script>
 </body>
 </html>"""
@@ -1131,6 +1168,53 @@ def api_estoque_zp():
     except Exception as e:
         return jsonify({"erro": str(e)}), 500
 
+
+
+SKUS_XR = ["Beep","La mafia","MAFIA","Pai ta on","PALHAÇO","Panico","PICA PAU","Town Country","Coringa","Azul","Branco","VERMELHO","XR PRETO"]
+SKUS_XR_NORM = [s.upper().strip() for s in SKUS_XR]
+
+def _buscar_estoque_xr():
+    todos=[]
+    params={"search_type":"scan","limit":100}
+    while True:
+        data=_get(f"/users/{USER_ID}/items/search",params=params)
+        if not data: break
+        ids=data.get("results",[])
+        todos.extend(ids)
+        scroll_id=data.get("scroll_id")
+        if not scroll_id or not ids: break
+        params={"search_type":"scan","scroll_id":scroll_id,"limit":100}
+    resultados=[]
+    for i in range(0,len(todos),20):
+        batch=todos[i:i+20]
+        data=_get("/items",params={"ids":",".join(batch),"attributes":"id,title,variations,available_quantity,seller_custom_field"})
+        if not data: continue
+        for item in (data if isinstance(data,list) else []):
+            body=item.get("body",item)
+            if not body: continue
+            item_id=body.get("id","")
+            title=body.get("title","")
+            variations=body.get("variations",[])
+            if variations:
+                for v in variations:
+                    sku=(v.get("seller_custom_field") or "").upper().strip()
+                    if sku in SKUS_XR_NORM:
+                        resultados.append({"item_id":item_id,"titulo":title,"sku":v.get("seller_custom_field",""),"estoque":v.get("available_quantity",0) or 0,"variation_id":v.get("id","")})
+            else:
+                sku=(body.get("seller_custom_field") or "").upper().strip()
+                if sku in SKUS_XR_NORM:
+                    resultados.append({"item_id":item_id,"titulo":title,"sku":body.get("seller_custom_field",""),"estoque":body.get("available_quantity",0) or 0,"variation_id":None})
+    resultados.sort(key=lambda x:x["sku"].upper())
+    return resultados
+
+@app.route("/api/estoque-xr")
+@login_required
+def api_estoque_xr():
+    try:
+        itens=_buscar_estoque_xr()
+        return jsonify({"itens":itens,"total":len(itens)})
+    except Exception as e:
+        return jsonify({"erro":str(e)}),500
 
 # ── Monitor de estoque ZP ──────────────────────────────────────────────────────
 import smtplib

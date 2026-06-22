@@ -858,6 +858,8 @@ window.addEventListener('DOMContentLoaded', () => {
       }, 3000);
     }
   });
+
+  setTimeout(() => { carregarZP(); carregarXR(); }, 2000);
 });
 
 async function carregarZP() {

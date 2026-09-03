@@ -515,10 +515,7 @@ HTML = """<!DOCTYPE html>
 
 <div class="section">
   <div class="tabs">
-    <div class="tab active" onclick="trocarAba('promo')">Participando</div>
-    <div class="tab" onclick="trocarAba('alerta')">Sem Continuidade</div>
-    <div class="tab" onclick="trocarAba('sem')">Sem Promoção</div>
-    <div class="tab" onclick="trocarAba('queda')">Queda de Vendas</div>
+    <div class="tab active" onclick="trocarAba('sem')">Sem Promoção</div>
     <div class="tab" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
   </div>
 

@@ -212,7 +212,7 @@ def carregar_dados():
     for item_id, promos in item_promos_started.items():
         info = titulos.get(item_id, {})
         titulo = info.get("title", item_id)
-        preco_orig = next((p.get("price") for p in promos if p.get("price")), None) or info.get("price", 0)
+        preco_orig = next((p.get("original_price") for p in promos if p.get("original_price")), None) or info.get("price", 0)
 
         now = datetime.now(timezone.utc)
 
@@ -242,7 +242,7 @@ def carregar_dados():
         )
 
         promo_names = [p.get("name") or p.get("type", "?") for p in promos]
-        preco_promo = min((p.get("new_price") or p.get("offer_price") or preco_orig for p in promos), default=preco_orig)
+        preco_promo = min((p.get("new_price") or p.get("offer_price") or p.get("price") or preco_orig for p in promos), default=preco_orig)
         desconto = round((1 - preco_promo / preco_orig) * 100, 1) if preco_orig else 0
         proximas = [p.get("name") or p.get("type", "?") for p in pendentes]
 
@@ -1013,7 +1013,7 @@ def api_dados():
     return jsonify(_cache["dados"])
 
 
-app.add_url_rule("/api/debug-promo/<item_id>", "api_debug_promo", login_required(lambda item_id: jsonify(_get(f"/seller-promotions/items/{item_id}", params={"app_version": "v2"})))); SKUS_ZP = [
+SKUS_ZP = [
     "ZP BRANCO/LARANJA", "ZP Preta/azul", "ZP preta/rosa", "ZP PRETA/VERDE",
     "ZP CINZA/PRETO", "ZP PRETO", "ZP preto/amarelo", "ZP PRETO/AQUA",
     "ZP PRETO/BRANCO", "ZP PRETA/CINZA", "ZP PRETO/ROXO", "ZP PRETO/LARANJA",

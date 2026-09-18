@@ -212,7 +212,7 @@ def carregar_dados():
     for item_id, promos in item_promos_started.items():
         info = titulos.get(item_id, {})
         titulo = info.get("title", item_id)
-        preco_orig = info.get("price", 0)
+        preco_orig = next((p.get("price") for p in promos if p.get("price")), None) or info.get("price", 0)
 
         now = datetime.now(timezone.utc)
 

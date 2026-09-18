@@ -1013,7 +1013,7 @@ def api_dados():
     return jsonify(_cache["dados"])
 
 
-SKUS_ZP = [
+app.add_url_rule("/api/debug-promo/<item_id>", "api_debug_promo", login_required(lambda item_id: jsonify(_get(f"/seller-promotions/items/{item_id}", params={"app_version": "v2"})))); SKUS_ZP = [
     "ZP BRANCO/LARANJA", "ZP Preta/azul", "ZP preta/rosa", "ZP PRETA/VERDE",
     "ZP CINZA/PRETO", "ZP PRETO", "ZP preto/amarelo", "ZP PRETO/AQUA",
     "ZP PRETO/BRANCO", "ZP PRETA/CINZA", "ZP PRETO/ROXO", "ZP PRETO/LARANJA",

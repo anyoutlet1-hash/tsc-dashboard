@@ -515,8 +515,8 @@ HTML = """<!DOCTYPE html>
 
 <div class="section">
   <div class="tabs">
-    <div class="tab active" onclick="trocarAba('sem')">Sem Promoção</div>
-    <div class="tab" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
+    <div class="tab active" data-aba="promo" onclick="trocarAba('promo')">Em Promoção</div>
+    <div class="tab" data-aba="sem" onclick="trocarAba('sem')">Sem Promoção</div><div class="tab" data-aba="catalogo" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
   </div>
 
   <div id="loading-msg">Carregando dados, aguarde (pode levar 2-3 minutos)...</div>
@@ -624,7 +624,7 @@ function trocarAba(aba) {
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   const abas = ['promo','alerta','sem','queda','catalogo','zp','xr'];
   const idx = abas.indexOf(aba);
-  document.querySelectorAll('.tab')[idx].classList.add('active');
+  const btn = document.querySelector('.tab[data-aba="' + aba + '"]'); if (btn) btn.classList.add('active');
   document.getElementById('tab-' + aba).classList.add('active');
 }
 

@@ -976,6 +976,14 @@ def debug_promo(item_id):
     return jsonify(raw)
 
 
+@app.route("/api/debug-raw")
+@login_required
+def debug_raw():
+    path = request.args.get("path", "")
+    params = {k: v for k, v in request.args.items() if k != "path"}
+    return jsonify(_get(path, params=params))
+
+
 @app.route("/api/debug-token")
 @login_required
 def debug_token():

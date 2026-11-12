@@ -117,6 +117,16 @@ def _fetch_item_promos(item_id):
             if p.get("type") == "PRICE_MATCHING" and s in ("started", "candidate"):
                 price_matching.append(p)
             if s == "started":
+                # A data de término da CAMPANHA (finish_date) costuma ser bem depois do fim
+                # da oferta do ITEM. A data real do anúncio vem do endpoint de itens da promoção.
+                pid, ptype = p.get("id"), p.get("type")
+                if pid and ptype and ptype != "PRICE_MATCHING":
+                    det = _get(f"/seller-promotions/promotions/{pid}/items",
+                               params={"promotion_type": ptype, "app_version": "v2", "item_id": item_id})
+                    for r in (det or {}).get("results", []) if isinstance(det, dict) else []:
+                        if r.get("id") == item_id and r.get("end_date"):
+                            p["finish_date"] = r["end_date"]
+                            break
                 started.append(p)
             elif s in ("pending", "candidate"):
                 pending.append(p)
@@ -967,21 +977,6 @@ def login():
 def logout():
     session.clear()
     return redirect("/login")
-
-
-@app.route("/api/debug-promo/<item_id>")
-@login_required
-def debug_promo(item_id):
-    raw = _get(f"/seller-promotions/items/{item_id}", params={"app_version": "v2"})
-    return jsonify(raw)
-
-
-@app.route("/api/debug-raw")
-@login_required
-def debug_raw():
-    path = request.args.get("path", "")
-    params = {k: v for k, v in request.args.items() if k != "path"}
-    return jsonify(_get(path, params=params))
 
 
 @app.route("/api/debug-token")

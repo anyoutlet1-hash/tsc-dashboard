@@ -969,6 +969,13 @@ def logout():
     return redirect("/login")
 
 
+@app.route("/api/debug-promo/<item_id>")
+@login_required
+def debug_promo(item_id):
+    raw = _get(f"/seller-promotions/items/{item_id}", params={"app_version": "v2"})
+    return jsonify(raw)
+
+
 @app.route("/api/debug-token")
 @login_required
 def debug_token():

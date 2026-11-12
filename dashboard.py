@@ -123,8 +123,9 @@ def _fetch_item_promos(item_id):
                 if pid and ptype and ptype != "PRICE_MATCHING":
                     det = _get(f"/seller-promotions/promotions/{pid}/items",
                                params={"promotion_type": ptype, "app_version": "v2", "item_id": item_id})
-                    for r in (det or {}).get("results", []) if isinstance(det, dict) else []:
-                        if r.get("id") == item_id and r.get("end_date"):
+                    lista = det.get("results") if isinstance(det, dict) else None
+                    for r in (lista or []):
+                        if isinstance(r, dict) and r.get("id") == item_id and r.get("end_date"):
                             p["finish_date"] = r["end_date"]
                             break
                 started.append(p)

@@ -111,7 +111,7 @@ def _fetch_item_promos(item_id):
     data = _get(f"/seller-promotions/items/{item_id}", params={"app_version": "v2"})
     started, pending, price_matching = [], [], []
     if data:
-        items = data if isinstance(data, list) else data.get("results", [])
+        items = (data if isinstance(data, list) else data.get("results")) or []
         for p in items:
             s = p.get("status")
             if p.get("type") == "PRICE_MATCHING" and s in ("started", "candidate"):

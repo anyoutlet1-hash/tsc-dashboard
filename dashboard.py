@@ -236,10 +236,14 @@ def carregar_dados():
         earliest_finish = min(datas_fim_ativas) if datas_fim_ativas else None
         latest_finish = max(datas_fim_ativas) if datas_fim_ativas else None
 
-        pendentes = [p for p in item_promos_pending.get(item_id, []) if p.get("type") != "PRICE_MATCHING"]
-        has_continuity = bool(pendentes) or len(set(str(d) for d in datas_fim_ativas)) > 1 or any(
-            p.get("status") == "candidate" and p.get("type") != "PRICE_MATCHING" for p in promos
-        )
+        # Continuidade real = promoção JÁ AGENDADA (status "pending"), ou mais de uma promoção
+        # ativa com datas de término diferentes. "candidate" é só convite (o item ainda não
+        # aderiu), então NÃO conta como continuidade.
+        pendentes = [
+            p for p in item_promos_pending.get(item_id, [])
+            if p.get("type") != "PRICE_MATCHING" and p.get("status") == "pending"
+        ]
+        has_continuity = bool(pendentes) or len(set(str(d) for d in datas_fim_ativas)) > 1
 
         promo_names = [p.get("name") or p.get("type", "?") for p in promos]
         preco_promo = min((p.get("new_price") or p.get("offer_price") or p.get("price") or preco_orig for p in promos), default=preco_orig)

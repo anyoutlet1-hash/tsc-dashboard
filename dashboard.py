@@ -183,6 +183,7 @@ def carregar_dados():
             for p in pending:
                 item_promos_pending[item_id].append(p)
             if price_matching:
+                price_matching.sort(key=lambda p: 0 if p.get("status") == "started" else 1)
                 item_price_matching[item_id] = price_matching[0]
 
     # Merge seller-level
@@ -330,6 +331,24 @@ def carregar_dados():
     ]
     sem_promo.sort(key=lambda x: x["titulo"])
 
+    # Promoção de tarifa (PRICE_MATCHING): "started" = participando, "candidate" = só convite
+    tarifa = []
+    for iid, p in item_price_matching.items():
+        inf = titulos.get(iid, {})
+        po = p.get("original_price") or inf.get("price", 0)
+        pp = p.get("price") or po
+        tarifa.append({
+            "item_id": iid,
+            "titulo": inf.get("title", iid),
+            "status": "PARTICIPANDO" if p.get("status") == "started" else "CONVITE",
+            "nome": p.get("name") or "Promoção de tarifa",
+            "preco_orig": po,
+            "preco_promo": pp,
+            "desconto": round((1 - pp / po) * 100, 1) if po else 0,
+            "qtd": inf.get("available_quantity", 0),
+        })
+    tarifa.sort(key=lambda x: (x["status"] != "PARTICIPANDO", x["titulo"]))
+
     # Catálogo antecipado para usar na análise de queda
     catalogo = carregar_catalogo()
     ids_perdendo_catalogo = set(c["item_id"] for c in catalogo.get("perdendo", []))
@@ -380,6 +399,7 @@ def carregar_dados():
         "queda_count": len(queda_items),
         "promocoes": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows_dedup],
         "sem_promo": sem_promo[:50],
+        "tarifa": tarifa,
         "queda": queda_items,
         "catalogo": catalogo,
     }
@@ -527,10 +547,21 @@ HTML = """<!DOCTYPE html>
 <div class="section">
   <div class="tabs">
     <div class="tab active" data-aba="promo" onclick="trocarAba('promo')">Em Promoção</div>
-    <div class="tab" data-aba="sem" onclick="trocarAba('sem')">Sem Promoção</div><div class="tab" data-aba="catalogo" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
+    <div class="tab" data-aba="sem" onclick="trocarAba('sem')">Sem Promoção</div><div class="tab" data-aba="tarifa" onclick="trocarAba('tarifa')">Promoção de Tarifa</div><div class="tab" data-aba="catalogo" onclick="trocarAba('catalogo')">Catálogo de Marca</div>
   </div>
 
   <div id="loading-msg">Carregando dados, aguarde (pode levar 2-3 minutos)...</div>
+
+  <div id="tab-tarifa" class="tab-content">
+    <div class="filtro">
+      <input type="text" id="busca-tarifa" placeholder="Filtrar por título ou ID..." oninput="filtrarTabela('tabela-tarifa','busca-tarifa')">
+      <span id="resumo-tarifa" style="margin-left:12px;color:#555"></span>
+    </div>
+    <table id="tabela-tarifa">
+      <thead><tr><th>ID</th><th>Título</th><th>Situação</th><th>Preço</th><th>Preço c/ tarifa reduzida</th><th>Estoque</th></tr></thead>
+      <tbody id="tbody-tarifa"></tbody>
+    </table>
+  </div>
 
   <div id="tab-promo" class="tab-content active">
     <div class="filtro">
@@ -633,7 +664,7 @@ let dadosGlobais = null;
 function trocarAba(aba) {
   document.querySelectorAll('.tab').forEach((t,i) => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  const abas = ['promo','alerta','sem','queda','catalogo','zp','xr'];
+  const abas = ['promo','alerta','sem','tarifa','queda','catalogo','zp','xr'];
   const idx = abas.indexOf(aba);
   const btn = document.querySelector('.tab[data-aba="' + aba + '"]'); if (btn) btn.classList.add('active');
   document.getElementById('tab-' + aba).classList.add('active');
@@ -666,6 +697,20 @@ function renderizar(dados) {
       <td>${r.desconto}%</td><td>${r.fim_promo}</td><td>${r.cobertura_ate}</td>
       <td>${diasCell}</td><td>${contBadge}</td>`;
     tb.appendChild(tr);
+  });
+
+  // Tabela promoção de tarifa
+  const tt = document.getElementById('tbody-tarifa');
+  tt.innerHTML = '';
+  const tarifa = dados.tarifa || [];
+  const nPart = tarifa.filter(r => r.status === 'PARTICIPANDO').length;
+  document.getElementById('resumo-tarifa').textContent = nPart + ' participando · ' + (tarifa.length - nPart) + ' só com convite';
+  tarifa.forEach(r => {
+    const tr = document.createElement('tr');
+    const badge = `<span class="badge ${r.status === 'PARTICIPANDO' ? 'sim' : 'aviso'}">${r.status === 'PARTICIPANDO' ? 'Participando' : 'Convite'}</span>`;
+    tr.innerHTML = `<td><a href="https://www.mercadolivre.com.br/anuncio/${r.item_id}" target="_blank">${r.item_id}</a></td>
+      <td>${r.titulo}</td><td>${badge}</td><td>${fmt(r.preco_orig)}</td><td>${fmt(r.preco_promo)} (${r.desconto}%)</td><td>${r.qtd}</td>`;
+    tt.appendChild(tr);
   });
 
   // Tabela alerta

@@ -195,11 +195,7 @@ def carregar_dados():
                 if not p.get("finish_date") and seller_p.get("finish_date"):
                     p["finish_date"] = seller_p["finish_date"]
 
-    for pid, promo in promos_started.items():
-        for i in promo.get("items", []):
-            iid = i.get("item_id") or i.get("id")
-            if iid and promo not in item_promos_started[iid]:
-                item_promos_started[iid].append(promo)
+    # (Removido) Não anexamos promoções do nível do vendedor aos itens: só vale o que a API do próprio item informa.
 
     # Títulos
     titulos = {}
@@ -263,7 +259,7 @@ def carregar_dados():
 
         dias_restantes = None
         if earliest_finish:
-            dias_restantes = (earliest_finish - now).days
+            dias_restantes = ((earliest_finish - timedelta(hours=3)).date() - (now - timedelta(hours=3)).date()).days
 
         rows.append({
             "item_id": item_id,
@@ -272,8 +268,8 @@ def carregar_dados():
             "preco_orig": preco_orig,
             "preco_promo": preco_promo,
             "desconto": desconto,
-            "fim_promo": earliest_finish.strftime("%d/%m/%Y") if earliest_finish else "-",
-            "cobertura_ate": latest_finish.strftime("%d/%m/%Y") if latest_finish else "-",
+            "fim_promo": (earliest_finish - timedelta(hours=3)).strftime("%d/%m/%Y") if earliest_finish else "-",
+            "cobertura_ate": (latest_finish - timedelta(hours=3)).strftime("%d/%m/%Y") if latest_finish else "-",
             "continuidade": "SIM" if has_continuity else "NAO",
             "proximas": ", ".join(proximas) if proximas else "-",
             "dias_restantes": dias_restantes,
@@ -978,14 +974,6 @@ def login():
 def logout():
     session.clear()
     return redirect("/login")
-
-
-@app.route("/api/debug-raw")
-@login_required
-def debug_raw():
-    path = request.args.get("path", "")
-    params = {k: v for k, v in request.args.items() if k != "path"}
-    return jsonify(_get(path, params=params))
 
 
 @app.route("/api/debug-token")
